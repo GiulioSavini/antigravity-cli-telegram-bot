@@ -576,17 +576,33 @@ command("/learn")(async ({ context, chatId, args }) => {
 });
 
 command("/btw")(async ({ context, chatId, args }) => {
+  const keyboard = createMainKeyboard(settingsFor(context, chatId));
   const question = args.join(" ").trim();
   if (!question) {
     await replyWithHtml(
       context,
       chatId,
       "Usage: <code>/btw &lt;side question&gt;</code>\n\nAsks AGY a side question against the current conversation without advancing it, so your next message resumes from before the aside.",
-      createMainKeyboard(settingsFor(context, chatId))
+      keyboard
     );
     return;
   }
-  enqueueJob(context, chatId, { prompt: `/btw ${question}`, kind: "prompt", ephemeral: true });
+  // A side question only makes sense against an existing conversation; without
+  // one it would spin up and immediately discard an orphan conversation.
+  if (!context.state.session(chatId)?.conversationId) {
+    await replyWithHtml(context, chatId, "No active conversation to interject into. Send a prompt first, then use <code>/btw</code>.", keyboard);
+    return;
+  }
+  // Running a side question mid-job would race the in-flight turn, so require a
+  // quiet queue (AGY has no print-mode interjection anyway).
+  const status = context.queue.statusForChat(chatId);
+  if (status.active || status.queued > 0) {
+    await replyWithHtml(context, chatId, "A prompt is still running. Wait for it to finish (or <code>/cancel</code>) before asking a side question.", keyboard);
+    return;
+  }
+  // AGY CLI rejects a literal `/btw` in print mode, so forward only the
+  // question text; the ephemeral flag drives the no-pollution behaviour.
+  enqueueJob(context, chatId, { prompt: question, kind: "prompt", ephemeral: true });
 });
 
 command("/rewind")(async ({ context, chatId, args }) => {

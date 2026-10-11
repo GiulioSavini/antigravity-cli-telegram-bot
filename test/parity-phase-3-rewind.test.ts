@@ -85,6 +85,31 @@ test("parity phase 3: /rewind with no history tells the user to start fresh", as
   }
 });
 
+test("parity phase 3: /rewind is refused while a prompt is running", async () => {
+  const harness = createHarness();
+  const ctx = asAppContext(harness);
+  try {
+    const older = "00000000-0000-4000-8000-000000000001";
+    const current = "00000000-0000-4000-8000-000000000002";
+    await ctx.state.setSession("12345", {
+      conversationId: current,
+      conversationHistory: [older],
+    } as never);
+    // Make the queue busy for this chat.
+    ctx.queue.enqueue({ chatId: "12345", kind: "prompt", prompt: "long running" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await handleUpdate(ctx, textUpdate(12345, "/rewind"));
+
+    const session = ctx.state.session("12345");
+    assert.equal(session?.conversationId, current, "conversation pointer must not move while busy");
+    const sent = harness.telegram.sentTexts();
+    assert.ok(sent.some((t) => t.includes("A prompt is still running")));
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test("parity phase 3: /rewind without an active conversation is a no-op with notice", async () => {
   const harness = createHarness();
   const ctx = asAppContext(harness);

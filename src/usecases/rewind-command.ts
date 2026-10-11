@@ -42,6 +42,14 @@ export async function handleRewindCommand(context: AppContext, chatId: ChatId, a
     return;
   }
 
+  // Moving the active conversation pointer while a turn is in flight would race
+  // the running job, so require a quiet queue first (mirrors /new).
+  const status = context.queue.statusForChat(chatId);
+  if (status.active || status.queued > 0) {
+    await replyWithHtml(context, chatId, "A prompt is still running. Wait for it to finish (or <code>/cancel</code>) before rewinding.", keyboard);
+    return;
+  }
+
   const history = session.conversationHistory ?? [];
   if (history.length === 0) {
     await replyWithHtml(context, chatId, "Nothing to rewind — this is the first turn. Use <code>/new</code> to start fresh.", keyboard);

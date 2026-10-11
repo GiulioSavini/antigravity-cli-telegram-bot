@@ -4,16 +4,32 @@ import { asAppContext, createHarness, textUpdate } from "./helpers/fixtures.js";
 import { handleUpdate } from "../src/router/updates.js";
 import { shouldAdvanceConversation } from "../src/usecases/prompt-job.js";
 
-test("parity phase 3: /btw enqueues an ephemeral prompt job carrying the directive", async () => {
+test("parity phase 3: /btw enqueues an ephemeral prompt job with the bare question (no /btw literal)", async () => {
   const harness = createHarness();
   const ctx = asAppContext(harness);
   try {
+    // A side question needs an active conversation to interject into.
+    await ctx.state.setSession("12345", { conversationId: "00000000-0000-4000-8000-000000000001" } as never);
     await handleUpdate(ctx, textUpdate(12345, "/btw what timezone is the server in?"));
     assert.equal(harness.capturedJobs.length, 1);
     const job = harness.capturedJobs[0];
     assert.equal(job.kind, "prompt");
     assert.equal(job.ephemeral, true);
-    assert.equal(job.prompt, "/btw what timezone is the server in?");
+    // AGY CLI rejects a literal `/btw` in print mode, so only the question is forwarded.
+    assert.equal(job.prompt, "what timezone is the server in?");
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("parity phase 3: /btw without an active conversation enqueues nothing and explains why", async () => {
+  const harness = createHarness();
+  const ctx = asAppContext(harness);
+  try {
+    await handleUpdate(ctx, textUpdate(12345, "/btw what timezone is the server in?"));
+    assert.equal(harness.capturedJobs.length, 0);
+    const sent = harness.telegram.sentTexts();
+    assert.ok(sent.some((t) => t.includes("No active conversation to interject into")));
   } finally {
     harness.cleanup();
   }
@@ -36,6 +52,7 @@ test("parity phase 3: /btw is a registered command, not an unknown-command rejec
   const harness = createHarness();
   const ctx = asAppContext(harness);
   try {
+    await ctx.state.setSession("12345", { conversationId: "00000000-0000-4000-8000-000000000001" } as never);
     await handleUpdate(ctx, textUpdate(12345, "/btw quick aside"));
     const sent = harness.telegram.sentTexts();
     assert.ok(!sent.some((t) => t.includes("Unknown command. Use /menu.")));
